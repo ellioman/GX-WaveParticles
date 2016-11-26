@@ -1,0 +1,139 @@
+﻿#pragma kernel WaveParticlesClear
+#pragma kernel WaveParticlesReset
+#pragma kernel WaveParticlesCollect
+#pragma kernel WaveParticlesGenerate
+#pragma kernel WaveParticlesOutput
+#pragma kernel WaveParticlesDelete
+
+struct WaveParticle
+{
+    float2 birthPosition;
+    float2 direction;
+    float amplitude;
+    float dispersionAngle;
+    float birthTime;
+    uint flags;
+};
+
+int bufferSize;
+RWStructuredBuffer<WaveParticle> bufferState;
+AppendStructuredBuffer<uint> bufferFreeListAppend;
+ConsumeStructuredBuffer<uint> bufferFreeListConsume;
+
+void NewParticle(float2 position, float2 direction, float amplitude, float dispersionAngle, float time)
+{
+    WaveParticle p;
+    p.birthPosition = position;
+    p.direction = direction;
+    p.amplitude = amplitude;
+    p.dispersionAngle = dispersionAngle;
+    p.birthTime = time;
+    p.flags = 1;
+
+    uint id = bufferFreeListConsume.Consume();
+    bufferState[id - 1] = p;
+}
+
+// Simulation
+
+[numthreads(8,1,1)]
+void WaveParticlesReset(uint id : SV_DispatchThreadID)
+{
+    WaveParticle p = (WaveParticle)0;
+    bufferState[id] = p;
+}
+
+[numthreads(8,1,1)]
+void WaveParticlesCollect(uint id : SV_DispatchThreadID)
+{
+    if (bufferState[id].flags == 0)
+    {
+        bufferFreeListAppend.Append(id + 1);
+    }
+}
+
+float genTime;
+float genWaveRadius;
+float genParticleRadius;
+float2 genCenter;
+
+#define PI 3.14159265358979323846f
+
+[numthreads(1,1,1)]
+void WaveParticlesGenerate()
+{
+    float2 v0 = float2(genWaveRadius, 0);
+    float len = sqrt(genWaveRadius * genWaveRadius - genParticleRadius * genWaveRadius);
+    float h = genParticleRadius * len / genWaveRadius;
+    float2 v1 = float2(sqrt(len * len - h * h), h);
+    float angle = (atan2(v1.y, v1.x) - atan2(v0.y, v0.x)) * 2.0f;
+
+    int n = floor(PI * 2.0f / angle);
+    float newAngle = PI * 2.0f / n;
+
+    for (int i = 0; i < n; i++)
+    {
+        float currentAngle = i * newAngle;
+        NewParticle(genCenter, float2(cos(currentAngle), sin(currentAngle)), 1.0f, newAngle, genTime);
+    }
+}
+
+// Rendering
+
+RWTexture2D<float4> outResult;
+float outTime;
+float outParticleRadius;
+float3 outOrigin;
+float3 outBasisX;
+float3 outBasisY;
+float2 outPlaneSize;
+int outTextureSize;
+
+float2 Project(float3 worldPosition)
+{
+    float3 direction = worldPosition - outOrigin;
+    return float2(dot(direction, outBasisX), dot(direction, outBasisY)) / outPlaneSize;
+}
+
+[numthreads(8,8,1)]
+void WaveParticlesClear(uint2 id : SV_DispatchThreadID)
+{
+    outResult[id.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+}
+
+[numthreads(8,1,1)]
+void WaveParticlesOutput(uint id : SV_DispatchThreadID)
+{
+    WaveParticle p = bufferState[id];
+    if (p.flags == 1)
+    {
+        float deltaTime = outTime - p.birthTime;
+        if (p.amplitude < 0.01f)
+        {
+            bufferState[id].flags = 0;
+            return;
+        }
+        float2 curPos = p.birthPosition + p.direction * deltaTime;
+        float arclen = deltaTime * sin(p.dispersionAngle / 4.0f);
+        if (arclen > outParticleRadius)
+        {
+            float2 sc;
+            sincos(p.dispersionAngle / 2.0f, sc.x, sc.y);
+            float2 newDir = float2(
+                p.direction.x * sc.y - p.direction.y * sc.x,
+                p.direction.x * sc.x + p.direction.y * sc.y
+            );
+
+            p.dispersionAngle /= 3.0f;
+            p.amplitude /= 3.0f;
+            bufferState[id] = p;
+
+            NewParticle(p.birthPosition, newDir, p.amplitude, p.dispersionAngle, p.birthTime);
+            NewParticle(p.birthPosition, reflect(newDir, p.direction), p.amplitude, p.dispersionAngle, p.birthTime);
+        }
+
+        float2 outProj = Project(float3(curPos.x, 0, curPos.y));
+        int2 outPos = outProj * outTextureSize;
+        outResult[outPos] = float4(1.0f, 1.0f, 1.0f, 1.0f);
+    }
+}
