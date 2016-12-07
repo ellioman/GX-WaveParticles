@@ -80,8 +80,9 @@ void WaveParticlesGenerate()
 
 // Rendering
 
-RWTexture2D<float4> outResult;
+RWTexture2D<float> outResult;
 float outTime;
+float outDamping;
 float outParticleRadius;
 float3 outOrigin;
 float3 outBasisX;
@@ -89,16 +90,28 @@ float3 outBasisY;
 float2 outPlaneSize;
 int outTextureSize;
 
-float2 Project(float3 worldPosition)
+int2 Project(float3 worldPosition)
 {
     float3 direction = worldPosition - outOrigin;
-    return float2(dot(direction, outBasisX), dot(direction, outBasisY)) / outPlaneSize;
+    float2 size = outTextureSize / outPlaneSize;
+    return size * float2(dot(direction, outBasisX), dot(direction, outBasisY));
+}
+
+float3 Unproject(int2 pixelPosition)
+{
+    float2 proj = float2(pixelPosition) / outTextureSize * outPlaneSize;
+    return outOrigin + proj.x * outBasisX + proj.y * outBasisY;
 }
 
 [numthreads(8,8,1)]
 void WaveParticlesClear(uint2 id : SV_DispatchThreadID)
 {
-    outResult[id.xy] = float4(0.0f, 0.0f, 0.0f, 1.0f);
+    outResult[id.xy] = 0.0f;
+}
+
+float rect(float x)
+{
+    return step(abs(x), 0.5f);
 }
 
 [numthreads(8,1,1)]
@@ -108,32 +121,51 @@ void WaveParticlesOutput(uint id : SV_DispatchThreadID)
     if (p.flags == 1)
     {
         float deltaTime = outTime - p.birthTime;
-        if (p.amplitude < 0.01f)
+        float amplitude = p.amplitude * exp(-outDamping * deltaTime);
+        if (amplitude < 0.01f)
         {
             bufferState[id].flags = 0;
             return;
         }
         float2 curPos = p.birthPosition + p.direction * deltaTime;
         float arclen = deltaTime * sin(p.dispersionAngle / 4.0f);
-        if (arclen > outParticleRadius)
+        if (arclen > outParticleRadius * 1.5f)
         {
-            float2 sc;
-            sincos(p.dispersionAngle / 2.0f, sc.x, sc.y);
-            float2 newDir = float2(
-                p.direction.x * sc.y - p.direction.y * sc.x,
-                p.direction.x * sc.x + p.direction.y * sc.y
+            float2 sc0;
+            sincos(p.dispersionAngle / +3.0f, sc0.x, sc0.y);
+            float2 newDir0 = float2(
+                p.direction.x * sc0.y - p.direction.y * sc0.x,
+                p.direction.x * sc0.x + p.direction.y * sc0.y
+            );
+            float2 sc1;
+            sincos(p.dispersionAngle / -3.0f, sc1.x, sc1.y);
+            float2 newDir1 = float2(
+                p.direction.x * sc1.y - p.direction.y * sc1.x,
+                p.direction.x * sc1.x + p.direction.y * sc1.y
             );
 
             p.dispersionAngle /= 3.0f;
-            p.amplitude /= 3.0f;
             bufferState[id] = p;
 
-            NewParticle(p.birthPosition, newDir, p.amplitude, p.dispersionAngle, p.birthTime);
-            NewParticle(p.birthPosition, reflect(newDir, p.direction), p.amplitude, p.dispersionAngle, p.birthTime);
+            NewParticle(p.birthPosition, newDir0, p.amplitude, p.dispersionAngle, p.birthTime);
+            NewParticle(p.birthPosition, newDir1, p.amplitude, p.dispersionAngle, p.birthTime);
         }
 
-        float2 outProj = Project(float3(curPos.x, 0, curPos.y));
-        int2 outPos = outProj * outTextureSize;
-        outResult[outPos] = float4(1.0f, 1.0f, 1.0f, 1.0f);
+        int2 outPos = Project(float3(curPos.x, 0, curPos.y));
+
+        int2 pixelSize = ceil(outParticleRadius * outTextureSize / outPlaneSize);
+        for (int y = -pixelSize.y; y <= pixelSize.y; y++)
+        {
+            for (int x = -pixelSize.x; x <= pixelSize.x; x++)
+            {
+                int2 p = outPos + int2(x, y);
+                float3 proj = Unproject(p);
+                float d = saturate(distance(float3(curPos.x, 0, curPos.y), proj) / outParticleRadius);
+                float coeff = 0.5f * (cos(PI * d) + 1) * rect(d * 0.5f);
+                //float coeff = d;
+                outResult[p] += coeff;
+            }
+        }
+        //outResult[outPos] += amplitude;
     }
 }

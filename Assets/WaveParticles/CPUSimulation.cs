@@ -87,12 +87,12 @@ public class CPUSimulation : MonoBehaviour
 
 	void SubdivideParticle(WaveParticle particle)
 	{
-        var sc = new Vector2(Mathf.Sin(particle.dispersionAngle / 2.0f), Mathf.Cos(particle.dispersionAngle / 2.0f));
+		float angle = particle.dispersionAngle / 3.0f;
 
-        particles.Add(new WaveParticle
+		particles.Add(new WaveParticle
 		{
 			birthPosition = particle.birthPosition,
-			direction = Utils.RotateCW(particle.direction, sc),
+			direction = Utils.Rotate(particle.direction, angle),
 			amplitude = particle.amplitude / 3.0f,
 			dispersionAngle = particle.dispersionAngle / 3.0f,
 			birthTime = particle.birthTime,
@@ -101,7 +101,7 @@ public class CPUSimulation : MonoBehaviour
 		particles.Add(new WaveParticle
 		{
 			birthPosition = particle.birthPosition,
-			direction = Utils.RotateCCW(particle.direction, sc),
+			direction = Utils.Rotate(particle.direction, -angle),
 			amplitude = particle.amplitude / 3.0f,
 			dispersionAngle = particle.dispersionAngle / 3.0f,
 			birthTime = particle.birthTime,
@@ -186,6 +186,7 @@ public class CPUSimulation : MonoBehaviour
 
 		float minAmplitude = 1.0f;
 
+		bool p = false;
 		foreach (var particle in particles)
 		{
 			var currentPosition = particle.GetPosition(currentTime);
@@ -193,13 +194,15 @@ public class CPUSimulation : MonoBehaviour
             //var v1 = Utils.Rotate(v0, particle.dispersionAngle);
             //var d = Vector2.Distance(v0, v1);
             float deltaTime = currentTime - particle.birthTime;
-            var d = deltaTime * Mathf.Sin(particle.dispersionAngle / 4.0f);
-            //var d = Utils.ChordLength(deltaTime, particle.dispersionAngle / 2.0f) * 2.0f;
+			var d = deltaTime * Mathf.Sin(particle.dispersionAngle / 4.0f);
+			//var d = Utils.ChordLength(deltaTime, particle.dispersionAngle / 2.0f) * 2.0f;
+			//var d = Utils.ChordLength(deltaTime, particle.dispersionAngle / 4.0f);
+			if (!p) { Debug.Log(d); p = true; }
             if (minAmplitude > particle.amplitude)
             {
                 minAmplitude = particle.amplitude;
             }
-            if (updating && d > particleRadius)
+            if (updating && d > particleRadius * 1.5f)
             {
                 particlesToSubdivide.Add(particle);
             }
@@ -233,10 +236,10 @@ public class CPUSimulation : MonoBehaviour
 		Debug.DrawLine(new Vector3(-halfPlaneSize.x, 0, +halfPlaneSize.y), new Vector3(-halfPlaneSize.x, 0, -halfPlaneSize.y), Color.green);
 		foreach (var particle in particles)
 		{
-			DebugExtension.DebugCircle(new Vector3(particle.birthPosition.x, 0, particle.birthPosition.y), Color.magenta, particleRadius);
-			DebugExtension.DrawArrow(new Vector3(particle.birthPosition.x, 0, particle.birthPosition.y), new Vector3(particle.direction.x, 0, particle.direction.y), Color.magenta);
+			DebugExtension.DebugCircle(new Vector3(particle.birthPosition.x, 0, particle.birthPosition.y), new Color(1, 0, 1, 0.25f), particleRadius);
+			DebugExtension.DrawArrow(new Vector3(particle.birthPosition.x, 0, particle.birthPosition.y), new Vector3(particle.direction.x, 0, particle.direction.y), new Color(1, 0, 1, 0.25f));
 			var currentPosition = particle.GetPosition(currentTime);
-			DebugExtension.DebugCircle(new Vector3(currentPosition.x, 0, currentPosition.y), Color.blue, particleRadius);
+			DebugExtension.DebugCircle(new Vector3(currentPosition.x, 0, currentPosition.y), new Color(0, 0, 1, 0.25f), particleRadius);
 		}
 	}
 

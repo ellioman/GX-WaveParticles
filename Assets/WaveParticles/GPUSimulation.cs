@@ -28,6 +28,7 @@ public class GPUSimulation : MonoBehaviour
 
     public float particleRadius;
     public float waveRadius;
+    public float damping = 1.0f;
     public Vector2 planeSize;
     float currentTime;
 
@@ -37,6 +38,10 @@ public class GPUSimulation : MonoBehaviour
         public Vector2 position;
     }
     List<GenEvent> events = new List<GenEvent>();
+
+    public Mesh mesh;
+    public int meshSize = 128;
+    public Material material;
 
     int debugCounter = 0;
     WaveParticle[] debugParticles = new WaveParticle[bufferSize];
@@ -68,7 +73,7 @@ public class GPUSimulation : MonoBehaviour
         kernelGenerate = shaderWaveParticles.FindKernel("WaveParticlesGenerate");
         kernelOutput = shaderWaveParticles.FindKernel("WaveParticlesOutput");
 
-        rtOutput = new RenderTexture(textureSize, textureSize, 0, RenderTextureFormat.ARGB32);
+        rtOutput = new RenderTexture(textureSize, textureSize, 0, RenderTextureFormat.RFloat);
         rtOutput.enableRandomWrite = true;
         rtOutput.Create();
 
@@ -77,6 +82,69 @@ public class GPUSimulation : MonoBehaviour
         bufferFreeList = new ComputeBuffer(bufferSize, 4, ComputeBufferType.Append);
 
         reset = true;
+
+        // Mesh
+        {
+            mesh = new Mesh();
+            mesh.name = "WaveParticles";
+
+            float spacing = 1.0f / meshSize;
+            var offset = new Vector3(-0.5f * planeSize.x, 0.0f, -0.5f * planeSize.y);
+
+            var vertices = new List<Vector3>();
+            var uvs = new List<Vector2>();
+            for (int y = 0; y <= meshSize; y++)
+            {
+                for (int x = 0; x <= meshSize; x++)
+                {
+                    vertices.Add(offset + new Vector3(x * spacing * planeSize.x, 0.0f, y * spacing * planeSize.y));
+                    uvs.Add(new Vector2((float)x / meshSize, (float)y / meshSize));
+                }
+                for (int x = 0; x < meshSize; x++)
+                {
+                    if (y < meshSize)
+                    {
+                        vertices.Add(offset + new Vector3((x + 0.5f) * spacing * planeSize.x, 0.0f, (y + 0.5f) * spacing * planeSize.y));
+                        uvs.Add(new Vector2((float)(x + 0.5f) / meshSize, (float)(y + 0.5f) / meshSize));
+                    }
+                }
+            }
+
+            var triangles = new List<int>();
+            for (int y = 0; y < meshSize; y++)
+            {
+                for (int x = 0; x < meshSize; x++)
+                {
+                    var i0 = y * (meshSize * 2 + 1) + x;
+                    var i1 = i0 + 1;
+                    var i2 = i0 + (meshSize * 2) + 1;
+                    var i3 = i2 + 1;
+                    var ic = i0 + meshSize + 1;
+
+                    triangles.Add(i1);
+                    triangles.Add(i0);
+                    triangles.Add(ic);
+
+                    triangles.Add(i1);
+                    triangles.Add(ic);
+                    triangles.Add(i3);
+
+                    triangles.Add(ic);
+                    triangles.Add(i2);
+                    triangles.Add(i3);
+
+                    triangles.Add(i0);
+                    triangles.Add(i2);
+                    triangles.Add(ic);
+                }
+            }
+
+            mesh.vertices = vertices.ToArray();
+            mesh.uv = uvs.ToArray();
+            mesh.triangles = triangles.ToArray();
+            mesh.UploadMeshData(false);
+            mesh.RecalculateNormals();
+        }
     }
 
     void Update()
@@ -128,6 +196,13 @@ public class GPUSimulation : MonoBehaviour
         {
             currentTime += Time.fixedDeltaTime;
         }
+    }
+
+    void LateUpdate()
+    {
+        material.SetFloat("_Amount", 1.0f);
+        material.SetTexture("_MainTex", rtOutput);
+        Graphics.DrawMesh(mesh, transform.localToWorldMatrix, material, gameObject.layer);
     }
 
     [Flags]
@@ -243,6 +318,7 @@ public class GPUSimulation : MonoBehaviour
         SetBuffers(kernelOutput, SetType.FreeList);
         shaderWaveParticles.SetTexture(kernelOutput, "outResult", rtOutput);
         shaderWaveParticles.SetFloat("outTime", currentTime);
+        shaderWaveParticles.SetFloat("outDamping", damping);
         shaderWaveParticles.SetFloat("outParticleRadius", particleRadius);
         shaderWaveParticles.SetFloats("outOrigin", outOrigin.x, outOrigin.y, outOrigin.z);
         shaderWaveParticles.SetFloats("outBasisX", outBasisX.x, outBasisX.y, outBasisX.z);
